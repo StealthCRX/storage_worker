@@ -25,6 +25,10 @@ export async function putFile(kv: KVNamespace, meta: FileMeta): Promise<void> {
   await kv.put(`file:${meta.id}`, JSON.stringify(meta));
 }
 
+export async function deleteFile(kv: KVNamespace, fileId: string): Promise<void> {
+  await kv.delete(`file:${fileId}`);
+}
+
 export async function listFiles(kv: KVNamespace): Promise<FileMeta[]> {
   const keys = await kv.list({ prefix: 'file:' });
   const files: FileMeta[] = [];

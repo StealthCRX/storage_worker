@@ -47,7 +47,7 @@ export function FileList({ files, loading, error, onRefresh }: FileListProps) {
         </thead>
         <tbody className="px-4">
           {files.map((file) => (
-            <FileRow key={file.id} file={file} onDownloaded={onRefresh} />
+            <FileRow key={file.id} file={file} onRefresh={onRefresh} />
           ))}
         </tbody>
       </table>

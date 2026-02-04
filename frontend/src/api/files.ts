@@ -34,3 +34,9 @@ export async function abortUpload(fileId: string, uploadId: string): Promise<voi
     body: JSON.stringify({ fileId, uploadId }),
   });
 }
+
+export async function deleteFile(fileId: string): Promise<void> {
+  await apiFetch(`/api/files/${fileId}`, {
+    method: 'DELETE',
+  });
+}

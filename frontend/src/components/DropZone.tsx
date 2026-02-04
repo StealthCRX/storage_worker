@@ -1,11 +1,11 @@
 import React, { useState, useRef, useCallback } from 'react';
 
 interface DropZoneProps {
-  onFileSelected: (file: File) => void;
+  onFilesSelected: (files: File[]) => void;
   disabled?: boolean;
 }
 
-export function DropZone({ onFileSelected, disabled }: DropZoneProps) {
+export function DropZone({ onFilesSelected, disabled }: DropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -35,12 +35,12 @@ export function DropZone({ onFileSelected, disabled }: DropZoneProps) {
       setIsDragging(false);
 
       if (disabled) return;
-      const files = e.dataTransfer.files;
+      const files = Array.from(e.dataTransfer.files);
       if (files.length > 0) {
-        onFileSelected(files[0]);
+        onFilesSelected(files);
       }
     },
-    [onFileSelected, disabled],
+    [onFilesSelected, disabled],
   );
 
   const handleClick = () => {
@@ -50,7 +50,7 @@ export function DropZone({ onFileSelected, disabled }: DropZoneProps) {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      onFileSelected(files[0]);
+      onFilesSelected(Array.from(files));
       e.target.value = '';
     }
   };
@@ -70,7 +70,7 @@ export function DropZone({ onFileSelected, disabled }: DropZoneProps) {
             : 'border-gray-300 hover:border-gray-400 bg-white'
       }`}
     >
-      <input ref={inputRef} type="file" className="hidden" onChange={handleChange} />
+      <input ref={inputRef} type="file" multiple className="hidden" onChange={handleChange} />
       <div className="text-gray-500">
         <svg
           className="mx-auto h-12 w-12 text-gray-400 mb-3"
@@ -85,8 +85,8 @@ export function DropZone({ onFileSelected, disabled }: DropZoneProps) {
             d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
           />
         </svg>
-        <p className="text-sm font-medium">Drop a file here or click to browse</p>
-        <p className="text-xs text-gray-400 mt-1">Supports files of any size</p>
+        <p className="text-sm font-medium">Drop files here or click to browse</p>
+        <p className="text-xs text-gray-400 mt-1">Supports multiple files of any size</p>
       </div>
     </div>
   );

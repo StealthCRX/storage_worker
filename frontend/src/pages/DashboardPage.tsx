@@ -6,16 +6,19 @@ import { FileList } from '../components/FileList';
 
 export function DashboardPage() {
   const { files, loading, error, refresh } = useFiles();
-  const { status, upload, reset } = useUpload(refresh);
-
-  const isUploading = status.state === 'uploading' || status.state === 'completing';
+  const { items, addFiles, cancelItem, removeItem, clearDone } = useUpload(refresh);
 
   return (
     <div className="space-y-8">
       <section>
         <h2 className="text-lg font-semibold text-gray-900 mb-3">Upload</h2>
-        <DropZone onFileSelected={upload} disabled={isUploading} />
-        <UploadProgress status={status} onReset={reset} />
+        <DropZone onFilesSelected={addFiles} disabled={false} />
+        <UploadProgress
+          items={items}
+          onCancel={cancelItem}
+          onRemove={removeItem}
+          onClearDone={clearDone}
+        />
       </section>
 
       <section>

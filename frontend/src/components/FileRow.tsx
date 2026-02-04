@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { FileMeta } from '../types';
 import { getDownloadUrl } from '../api/download';
+import { deleteFile } from '../api/files';
 import { DownloadLog } from './DownloadLog';
 
 function formatSize(bytes: number): string {
@@ -12,17 +13,17 @@ function formatSize(bytes: number): string {
 
 interface FileRowProps {
   file: FileMeta;
-  onDownloaded?: () => void;
+  onRefresh?: () => void;
 }
 
-export function FileRow({ file, onDownloaded }: FileRowProps) {
+export function FileRow({ file, onRefresh }: FileRowProps) {
   const [downloading, setDownloading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const handleDownload = async () => {
     setDownloading(true);
     try {
       const { url } = await getDownloadUrl(file.id);
-      // Open presigned URL in new tab to trigger browser download
       const a = document.createElement('a');
       a.href = url;
       a.download = file.name;
@@ -31,11 +32,24 @@ export function FileRow({ file, onDownloaded }: FileRowProps) {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      onDownloaded?.();
+      onRefresh?.();
     } catch (err) {
       console.error('Download failed:', err);
     } finally {
       setDownloading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`Delete "${file.name}"?`)) return;
+    setDeleting(true);
+    try {
+      await deleteFile(file.id);
+      onRefresh?.();
+    } catch (err) {
+      console.error('Delete failed:', err);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -51,13 +65,20 @@ export function FileRow({ file, onDownloaded }: FileRowProps) {
       <td className="py-3 pr-4">
         <DownloadLog downloads={file.downloads} />
       </td>
-      <td className="py-3 text-right">
+      <td className="py-3 text-right whitespace-nowrap">
         <button
           onClick={handleDownload}
-          disabled={downloading}
-          className="text-sm text-blue-600 hover:text-blue-700 hover:underline disabled:opacity-50"
+          disabled={downloading || deleting}
+          className="text-sm text-blue-600 hover:text-blue-700 hover:underline disabled:opacity-50 mr-3"
         >
           {downloading ? 'Preparing...' : 'Download'}
+        </button>
+        <button
+          onClick={handleDelete}
+          disabled={downloading || deleting}
+          className="text-sm text-red-500 hover:text-red-700 hover:underline disabled:opacity-50"
+        >
+          {deleting ? 'Deleting...' : 'Delete'}
         </button>
       </td>
     </tr>

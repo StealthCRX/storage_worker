@@ -1,34 +1,40 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { sliceFile } from '../lib/chunker';
 import { uploadChunks, UploadPartResult } from '../lib/uploader';
 import { initiateUpload, completeUpload, abortUpload } from '../api/files';
 
-type UploadState = 'idle' | 'uploading' | 'completing' | 'done' | 'error';
+type UploadItemState = 'pending' | 'uploading' | 'completing' | 'done' | 'error' | 'cancelled';
 
-export interface UploadStatus {
-  state: UploadState;
-  progress: number; // 0-100
-  fileName: string | null;
+export interface UploadItem {
+  id: string;
+  file: File;
+  state: UploadItemState;
+  progress: number;
   error: string | null;
+  fileId?: string;
+  uploadId?: string;
 }
 
 export function useUpload(onComplete?: () => void) {
-  const [status, setStatus] = useState<UploadStatus>({
-    state: 'idle',
-    progress: 0,
-    fileName: null,
-    error: null,
-  });
+  const [items, setItems] = useState<UploadItem[]>([]);
+  const cancelledRef = useRef<Set<string>>(new Set());
 
-  const upload = useCallback(
-    async (file: File) => {
-      setStatus({ state: 'uploading', progress: 0, fileName: file.name, error: null });
+  const updateItem = (id: string, updates: Partial<UploadItem>) => {
+    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
+  };
+
+  const uploadFile = useCallback(
+    async (item: UploadItem) => {
+      const { id, file } = item;
+
+      if (cancelledRef.current.has(id)) return;
+
+      updateItem(id, { state: 'uploading', progress: 0 });
 
       let fileId = '';
       let uploadId = '';
 
       try {
-        // Initiate multipart upload
         const result = await initiateUpload(
           file.name,
           file.size,
@@ -37,32 +43,40 @@ export function useUpload(onComplete?: () => void) {
         fileId = result.fileId;
         uploadId = result.uploadId;
 
-        // Slice file into chunks
+        updateItem(id, { fileId, uploadId });
+
+        if (cancelledRef.current.has(id)) {
+          abortUpload(fileId, uploadId).catch(() => {});
+          return;
+        }
+
         const chunks = sliceFile(file, result.chunkSize);
 
-        // Upload chunks with progress
         const parts: UploadPartResult[] = await uploadChunks(
           result.urls,
           chunks,
           (uploaded, total) => {
-            setStatus((prev) => ({
-              ...prev,
-              progress: Math.round((uploaded / total) * 100),
-            }));
+            if (!cancelledRef.current.has(id)) {
+              updateItem(id, { progress: Math.round((uploaded / total) * 100) });
+            }
           },
         );
 
-        // Complete the upload
-        setStatus((prev) => ({ ...prev, state: 'completing', progress: 100 }));
+        if (cancelledRef.current.has(id)) {
+          abortUpload(fileId, uploadId).catch(() => {});
+          return;
+        }
+
+        updateItem(id, { state: 'completing', progress: 100 });
         await completeUpload(fileId, uploadId, parts);
 
-        setStatus({ state: 'done', progress: 100, fileName: file.name, error: null });
+        updateItem(id, { state: 'done', progress: 100 });
         onComplete?.();
       } catch (err) {
+        if (cancelledRef.current.has(id)) return;
         const message = err instanceof Error ? err.message : 'Upload failed';
-        setStatus({ state: 'error', progress: 0, fileName: file.name, error: message });
+        updateItem(id, { state: 'error', progress: 0, error: message });
 
-        // Try to abort the multipart upload if it was initiated
         if (fileId && uploadId) {
           abortUpload(fileId, uploadId).catch(() => {});
         }
@@ -71,9 +85,47 @@ export function useUpload(onComplete?: () => void) {
     [onComplete],
   );
 
-  const reset = useCallback(() => {
-    setStatus({ state: 'idle', progress: 0, fileName: null, error: null });
+  const addFiles = useCallback(
+    (files: File[]) => {
+      const newItems: UploadItem[] = files.map((file) => ({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file,
+        state: 'pending' as const,
+        progress: 0,
+        error: null,
+      }));
+
+      setItems((prev) => [...prev, ...newItems]);
+      newItems.forEach((item) => uploadFile(item));
+    },
+    [uploadFile],
+  );
+
+  const cancelItem = useCallback((id: string) => {
+    cancelledRef.current.add(id);
+    setItems((prev) => {
+      const item = prev.find((i) => i.id === id);
+      if (item?.fileId && item?.uploadId) {
+        abortUpload(item.fileId, item.uploadId).catch(() => {});
+      }
+      return prev.map((i) => (i.id === id ? { ...i, state: 'cancelled' as const } : i));
+    });
   }, []);
 
-  return { status, upload, reset };
+  const removeItem = useCallback((id: string) => {
+    cancelledRef.current.delete(id);
+    setItems((prev) => prev.filter((i) => i.id !== id));
+  }, []);
+
+  const clearDone = useCallback(() => {
+    setItems((prev) =>
+      prev.filter((i) => i.state !== 'done' && i.state !== 'error' && i.state !== 'cancelled'),
+    );
+  }, []);
+
+  const hasActive = items.some(
+    (i) => i.state === 'uploading' || i.state === 'completing' || i.state === 'pending',
+  );
+
+  return { items, addFiles, cancelItem, removeItem, clearDone, hasActive };
 }
