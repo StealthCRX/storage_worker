@@ -5,7 +5,7 @@ account_id = "348feb93cf83e02dcebca8910abd0dca"
 
 [vars]
 ALLOWED_ORIGIN = "https://storage-transfer.pages.dev"
-CHUNK_SIZE = "26214400"
+CHUNK_SIZE = "5242880"
 R2_ACCOUNT_ID = "348feb93cf83e02dcebca8910abd0dca"
 R2_BUCKET_NAME = "localdata"
 
