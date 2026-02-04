@@ -95,22 +95,28 @@ upload.post('/complete', async (c) => {
     return c.json({ error: 'File not found' }, 404);
   }
 
-  // Complete multipart upload via R2 binding
-  const multipartUpload = c.env.R2_BUCKET.resumeMultipartUpload(meta.r2Key, uploadId);
+  try {
+    // Complete multipart upload via R2 binding
+    const multipartUpload = c.env.R2_BUCKET.resumeMultipartUpload(meta.r2Key, uploadId);
 
-  await multipartUpload.complete(
-    parts.map((p) => ({
-      partNumber: p.partNumber,
-      etag: p.etag,
-    })),
-  );
+    await multipartUpload.complete(
+      parts.map((p) => ({
+        partNumber: p.partNumber,
+        etag: p.etag.replace(/^"|"$/g, ''),
+      })),
+    );
 
-  // Update KV metadata
-  meta.status = 'complete';
-  delete meta.uploadId;
-  await putFile(c.env.KV, meta);
+    // Update KV metadata
+    meta.status = 'complete';
+    delete meta.uploadId;
+    await putFile(c.env.KV, meta);
 
-  return c.json({ success: true, fileId });
+    return c.json({ success: true, fileId });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Complete upload failed:', message, { fileId, uploadId, partsCount: parts.length });
+    return c.json({ error: `Complete failed: ${message}` }, 500);
+  }
 });
 
 upload.post('/abort', async (c) => {
