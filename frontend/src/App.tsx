@@ -10,7 +10,7 @@ export default function App() {
 
   return (
     <AuthContext.Provider value={auth}>
-      <BrowserRouter basename="/Storage-transfer">
+      <BrowserRouter>
         <Layout>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
