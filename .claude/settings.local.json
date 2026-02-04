@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(node --version)",
+      "Bash(npm --version)",
+      "Bash(npx:*)",
+      "Bash(npm install)",
+      "Bash(where npm:*)",
+      "Bash(where:*)",
+      "Bash(tree:*)",
+      "Bash(del \"c:\\\\Users\\\\samar\\\\OneDrive\\\\Desktop\\\\Storage-transfer\\\\storage_worker\\\\frontend\\\\public\\\\404.html\")",
+      "Bash(node -e:*)",
+      "Bash(npm ci:*)",
+      "Bash(VITE_API_BASE_URL=\"https://storage-transfer-worker.stealthcrx.workers.dev\" npm run build:*)",
+      "Bash(CLOUDFLARE_ACCOUNT_ID=\"348feb93cf83e02dcebca8910abd0dca\" npx wrangler pages project create:*)",
+      "Bash(CLOUDFLARE_ACCOUNT_ID=\"348feb93cf83e02dcebca8910abd0dca\" npx wrangler pages deploy:*)",
+      "Bash(git add:*)",
+      "Bash(git rm:*)",
+      "Bash(git commit:*)",
+      "Bash(git config:*)"
+    ]
+  }
+}

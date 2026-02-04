@@ -1,0 +1,24 @@
+name = "storage-transfer-worker"
+main = "src/index.ts"
+compatibility_date = "2024-06-20"
+account_id = "348feb93cf83e02dcebca8910abd0dca"
+
+[vars]
+ALLOWED_ORIGIN = "https://storage-transfer.pages.dev"
+CHUNK_SIZE = "26214400"
+R2_ACCOUNT_ID = "348feb93cf83e02dcebca8910abd0dca"
+R2_BUCKET_NAME = "localdata"
+
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "localdata"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "8246acb6f1d74ffeb0067fdcf004c51f"
+
+# Secrets (set via `wrangler secret put`):
+# ACCESS_CODE
+# JWT_SECRET
+# R2_ACCESS_KEY_ID
+# R2_SECRET_ACCESS_KEY
