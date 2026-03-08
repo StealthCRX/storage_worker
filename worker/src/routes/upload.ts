@@ -1,46 +1,32 @@
 import { Hono } from 'hono';
 import { generatePresignedPutUrl } from '../lib/r2';
-import { putFile, getFile, FileMeta } from '../lib/kv';
+import {
+  putSession,
+  getSession,
+  addSessionToDateIndex,
+  putFileLookup,
+  SessionMeta,
+  SessionFile,
+} from '../lib/kv';
+import type { Env } from '../types';
 
-type Env = {
-  Bindings: {
-    R2_BUCKET: R2Bucket;
-    KV: KVNamespace;
-    R2_ACCESS_KEY_ID: string;
-    R2_SECRET_ACCESS_KEY: string;
-    R2_ACCOUNT_ID: string;
-    R2_BUCKET_NAME: string;
-    CHUNK_SIZE: string;
-  };
-  Variables: {
-    user: string;
-  };
-};
+const FIFTY_MB = 50 * 1024 * 1024;
 
 const upload = new Hono<Env>();
 
-upload.post('/initiate', async (c) => {
-  const { fileName, fileSize, contentType } = await c.req.json<{
-    fileName: string;
-    fileSize: number;
-    contentType: string;
+upload.post('/session', async (c) => {
+  const { files } = await c.req.json<{
+    files: { name: string; size: number; contentType: string; category: 'original' | 'converted' }[];
   }>();
 
-  if (!fileName || !fileSize || !contentType) {
-    return c.json({ error: 'fileName, fileSize, and contentType are required' }, 400);
+  if (!files || files.length === 0) {
+    return c.json({ error: 'files array is required' }, 400);
   }
 
-  const fileId = crypto.randomUUID();
-  const r2Key = `Data Upload/${fileId}/${fileName}`;
-  const chunkSize = parseInt(c.env.CHUNK_SIZE) || 26214400;
-  const totalParts = Math.ceil(fileSize / chunkSize);
+  const sessionId = crypto.randomUUID().slice(0, 8);
+  const date = new Date().toISOString().slice(0, 10);
+  const userName = c.get('user');
 
-  // Create multipart upload via R2 binding
-  const multipartUpload = await c.env.R2_BUCKET.createMultipartUpload(r2Key, {
-    httpMetadata: { contentType },
-  });
-
-  // Generate presigned PUT URLs for each part
   const presignOpts = {
     accountId: c.env.R2_ACCOUNT_ID,
     accessKeyId: c.env.R2_ACCESS_KEY_ID,
@@ -48,57 +34,107 @@ upload.post('/initiate', async (c) => {
     bucketName: c.env.R2_BUCKET_NAME,
   };
 
-  const urls: string[] = [];
-  for (let i = 1; i <= totalParts; i++) {
-    const url = await generatePresignedPutUrl(
-      presignOpts,
+  const sessionFiles: SessionFile[] = [];
+  const responseFiles: {
+    fileId: string;
+    uploadId: string;
+    urls: string[];
+    chunkSize: number;
+    totalParts: number;
+  }[] = [];
+
+  for (const file of files) {
+    const fileId = crypto.randomUUID();
+    let folder: string;
+    if (file.category === 'converted') {
+      const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+      const isImage = ['jpg', 'jpeg', 'png', 'webp', 'bmp'].includes(ext);
+      folder = isImage ? 'converted/frames' : 'converted/video';
+    } else {
+      folder = 'original';
+    }
+    const r2Key = `${userName}/${date}/${folder}/${file.name}`;
+
+    // Dynamic chunk size: max(50MB, ceil(fileSize / 9999))
+    const chunkSize = Math.max(FIFTY_MB, Math.ceil(file.size / 9999));
+    const totalParts = Math.ceil(file.size / chunkSize);
+
+    // Create multipart upload via R2 binding
+    const multipartUpload = await c.env.R2_BUCKET.createMultipartUpload(r2Key, {
+      httpMetadata: { contentType: file.contentType },
+    });
+
+    // Generate presigned PUT URLs for each part
+    const urls: string[] = [];
+    for (let i = 1; i <= totalParts; i++) {
+      const url = await generatePresignedPutUrl(
+        presignOpts,
+        r2Key,
+        i,
+        multipartUpload.uploadId,
+      );
+      urls.push(url);
+    }
+
+    const sessionFile: SessionFile = {
+      id: fileId,
+      name: file.name,
+      size: file.size,
+      contentType: file.contentType,
+      category: file.category,
       r2Key,
-      i,
-      multipartUpload.uploadId,
-    );
-    urls.push(url);
+      status: 'uploading',
+      uploadId: multipartUpload.uploadId,
+      downloads: [],
+    };
+    sessionFiles.push(sessionFile);
+
+    // Store file lookup
+    await putFileLookup(c.env.KV, fileId, sessionId);
+
+    responseFiles.push({
+      fileId,
+      uploadId: multipartUpload.uploadId,
+      urls,
+      chunkSize,
+      totalParts,
+    });
   }
 
-  // Store metadata in KV
-  const meta: FileMeta = {
-    id: fileId,
-    name: fileName,
-    size: fileSize,
-    contentType,
-    uploadedBy: c.get('user'),
-    uploadedAt: new Date().toISOString(),
-    status: 'uploading',
-    r2Key,
-    uploadId: multipartUpload.uploadId,
-    downloads: [],
+  const session: SessionMeta = {
+    id: sessionId,
+    date,
+    createdBy: userName,
+    createdAt: new Date().toISOString(),
+    files: sessionFiles,
   };
-  await putFile(c.env.KV, meta);
 
-  return c.json({
-    fileId,
-    uploadId: multipartUpload.uploadId,
-    urls,
-    totalParts,
-    chunkSize,
-  });
+  await putSession(c.env.KV, session);
+  await addSessionToDateIndex(c.env.KV, date, sessionId);
+
+  return c.json({ sessionId, files: responseFiles });
 });
 
-upload.post('/complete', async (c) => {
-  const { fileId, uploadId, parts } = await c.req.json<{
+upload.post('/complete-file', async (c) => {
+  const { sessionId, fileId, uploadId, parts } = await c.req.json<{
+    sessionId: string;
     fileId: string;
     uploadId: string;
     parts: { partNumber: number; etag: string }[];
   }>();
 
-  const meta = await getFile(c.env.KV, fileId);
-  if (!meta) {
-    return c.json({ error: 'File not found' }, 404);
+  const session = await getSession(c.env.KV, sessionId);
+  if (!session) {
+    return c.json({ error: 'Session not found' }, 404);
+  }
+
+  const file = session.files.find((f) => f.id === fileId);
+  if (!file) {
+    return c.json({ error: 'File not found in session' }, 404);
   }
 
   try {
-    // Complete multipart upload via R2 binding
-    const multipartUpload = c.env.R2_BUCKET.resumeMultipartUpload(meta.r2Key, uploadId);
-
+    const multipartUpload = c.env.R2_BUCKET.resumeMultipartUpload(file.r2Key, uploadId);
     await multipartUpload.complete(
       parts.map((p) => ({
         partNumber: p.partNumber,
@@ -106,35 +142,40 @@ upload.post('/complete', async (c) => {
       })),
     );
 
-    // Update KV metadata
-    meta.status = 'complete';
-    delete meta.uploadId;
-    await putFile(c.env.KV, meta);
+    file.status = 'complete';
+    delete file.uploadId;
+    await putSession(c.env.KV, session);
 
     return c.json({ success: true, fileId });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('Complete upload failed:', message, { fileId, uploadId, partsCount: parts.length });
+    console.error('Complete file failed:', message, { sessionId, fileId, uploadId });
     return c.json({ error: `Complete failed: ${message}` }, 500);
   }
 });
 
-upload.post('/abort', async (c) => {
-  const { fileId, uploadId } = await c.req.json<{
+upload.post('/abort-file', async (c) => {
+  const { sessionId, fileId, uploadId } = await c.req.json<{
+    sessionId: string;
     fileId: string;
     uploadId: string;
   }>();
 
-  const meta = await getFile(c.env.KV, fileId);
-  if (!meta) {
-    return c.json({ error: 'File not found' }, 404);
+  const session = await getSession(c.env.KV, sessionId);
+  if (!session) {
+    return c.json({ error: 'Session not found' }, 404);
   }
 
-  const multipartUpload = c.env.R2_BUCKET.resumeMultipartUpload(meta.r2Key, uploadId);
+  const file = session.files.find((f) => f.id === fileId);
+  if (!file) {
+    return c.json({ error: 'File not found in session' }, 404);
+  }
+
+  const multipartUpload = c.env.R2_BUCKET.resumeMultipartUpload(file.r2Key, uploadId);
   await multipartUpload.abort();
 
-  meta.status = 'failed';
-  await putFile(c.env.KV, meta);
+  file.status = 'failed';
+  await putSession(c.env.KV, session);
 
   return c.json({ success: true });
 });
